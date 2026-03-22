@@ -12,7 +12,7 @@ def get_connection():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 # =====================================================
-# Fetch Data Functions (USER)
+# FETCH FUNCTIONS
 # =====================================================
 def get_passages():
     conn = get_connection()
@@ -33,34 +33,18 @@ def get_questions(passage_id):
 def get_options(question_id):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id, label, weight FROM options WHERE question_id=?",
-        (question_id,)
-    )
+    cur.execute("SELECT id, label, weight FROM options WHERE question_id=?", (question_id,))
     rows = cur.fetchall()
     conn.close()
     return rows
 
-def save_response(passage_id, user_name, score, empathy_level, answers_json):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO responses (passage_id, user_name, score, empathy_level, answers_json)
-        VALUES (?, ?, ?, ?, ?)
-    """, (passage_id, user_name, score, empathy_level, answers_json))
-    conn.commit()
-    conn.close()
-
 # =====================================================
-# Admin Insert Functions
+# CREATE FUNCTIONS
 # =====================================================
 def add_passage(title, text):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO passages (title, text) VALUES (?, ?)",
-        (title, text)
-    )
+    cur.execute("INSERT INTO passages (title, text) VALUES (?, ?)", (title, text))
     conn.commit()
     pid = cur.lastrowid
     conn.close()
@@ -69,10 +53,7 @@ def add_passage(title, text):
 def add_question(passage_id, text):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO questions (passage_id, text) VALUES (?, ?)",
-        (passage_id, text)
-    )
+    cur.execute("INSERT INTO questions (passage_id, text) VALUES (?, ?)", (passage_id, text))
     conn.commit()
     qid = cur.lastrowid
     conn.close()
@@ -88,23 +69,85 @@ def add_options(question_id, options):
     conn.commit()
     conn.close()
 
+def save_response(passage_id, user_name, score, empathy_level, answers_json):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO responses (passage_id, user_name, score, empathy_level, answers_json)
+        VALUES (?, ?, ?, ?, ?)
+    """, (passage_id, user_name, score, empathy_level, answers_json))
+    conn.commit()
+    conn.close()
+
 # =====================================================
-# NLP: Question Generator (Rule-based, Explainable)
+# UPDATE FUNCTIONS
+# =====================================================
+def update_passage(passage_id, title, text):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE passages SET title=?, text=? WHERE id=?", (title, text, passage_id))
+    conn.commit()
+    conn.close()
+
+def update_question(question_id, text):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE questions SET text=? WHERE id=?", (text, question_id))
+    conn.commit()
+    conn.close()
+
+def update_option(option_id, label, weight):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE options SET label=?, weight=? WHERE id=?", (label, weight, option_id))
+    conn.commit()
+    conn.close()
+
+# =====================================================
+# DELETE FUNCTIONS
+# =====================================================
+def delete_passage(passage_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM options WHERE question_id IN (SELECT id FROM questions WHERE passage_id=?)", (passage_id,))
+    cur.execute("DELETE FROM questions WHERE passage_id=?", (passage_id,))
+    cur.execute("DELETE FROM responses WHERE passage_id=?", (passage_id,))
+    cur.execute("DELETE FROM passages WHERE id=?", (passage_id,))
+    conn.commit()
+    conn.close()
+
+def delete_question(question_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM options WHERE question_id=?", (question_id,))
+    cur.execute("DELETE FROM questions WHERE id=?", (question_id,))
+    conn.commit()
+    conn.close()
+
+def delete_option(option_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM options WHERE id=?", (option_id,))
+    conn.commit()
+    conn.close()
+
+# =====================================================
+# NLP Question Generator
 # =====================================================
 def generate_questions_from_passage(passage_text):
     words = re.findall(r'\b[A-Za-z]{4,}\b', passage_text)
     focus = words[0] if words else "the person"
 
     return [
-        f"How would you emotionally respond to {focus} in this situation?",
-        "What would be your immediate action after understanding the situation?",
-        "How would you communicate with the person involved empathetically?",
-        "What kind of support would you offer considering the circumstances?",
-        "How would you handle similar situations in the future?"
+        f"How would you emotionally respond to {focus}?",
+        "What would be your immediate action?",
+        "How would you communicate empathetically?",
+        "What support would you offer?",
+        "How would you handle similar situations?"
     ]
 
 # =====================================================
-# Empathy Level Logic
+# Empathy Logic
 # =====================================================
 def get_empathy_level(score):
     if score < 6:
@@ -115,129 +158,171 @@ def get_empathy_level(score):
         return "High Empathy 💖"
 
 # =====================================================
-# Streamlit Config
+# STREAMLIT UI
 # =====================================================
 st.set_page_config(page_title="Empathy Analysis", layout="centered")
 
-# =====================================================
-# Sidebar Mode Selector
-# =====================================================
 st.sidebar.title("⚙️ Control Panel")
-mode = st.sidebar.radio("Select Mode", ["User", "Company / Admin"])
+mode = st.sidebar.radio("Select Mode", ["User", "Admin"])
 
 # =====================================================
-# COMPANY / ADMIN MODE
+# ADMIN MODE
 # =====================================================
-if mode == "Company / Admin":
-    st.title("🏢 Company Admin – Add Empathy Passage")
+if mode == "Admin":
+    st.title("🏢 Admin Panel")
 
-    passage_title = st.text_input("Passage Title")
-    passage_text = st.text_area("Passage Description (Situation)")
-
-    if st.button("🧠 Generate 5 Questions using NLP"):
-        if not passage_text:
-            st.warning("Please enter passage text first.")
-        else:
-            st.session_state.questions = generate_questions_from_passage(passage_text)
-
-    questions = st.session_state.get("questions", [])
-
-    question_blocks = []
-
-    for i, q in enumerate(questions):
-        st.subheader(f"Question {i+1}")
-        q_text = st.text_input(f"Edit Question {i+1}", q)
-
-        options = []
-        for j in range(5):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                opt_text = st.text_input(f"Option {j+1} (Q{i+1})")
-            with col2:
-                weight = st.selectbox(
-                    "Weight",
-                    [1, 2, 3, 4, 5],
-                    key=f"w_{i}_{j}"
-                )
-            options.append((opt_text, weight))
-
-        question_blocks.append((q_text, options))
-        st.markdown("---")
-
-    if st.button("💾 Save Passage & Questionnaire"):
-        if not passage_title or not passage_text:
-            st.error("Passage title and text are required.")
-        else:
-            pid = add_passage(passage_title, passage_text)
-
-            for q_text, opts in question_blocks:
-                qid = add_question(pid, q_text)
-                add_options(qid, opts)
-
-            st.success("✅ Passage, questions, and options saved successfully!")
-            st.info("Switch to User mode to view the new passage.")
-
-# =====================================================
-# USER MODE (YOUR ORIGINAL LOGIC – UNCHANGED)
-# =====================================================
-if mode == "User":
-    st.title("🧠 Empathy Analysis Application")
-
-    user_name = st.text_input("Enter your name:")
+    # -------------------------------
+    # EDIT / DELETE PASSAGE
+    # -------------------------------
+    st.subheader("✏️ Edit / Delete Passage")
 
     passages = get_passages()
 
-    if not passages:
-        st.error("⚠️ No passages found in the database.")
-    else:
-        passage_titles = [p[1] for p in passages]
-        selected_title = st.selectbox("Choose a Passage:", passage_titles)
+    if passages:
+        passage_dict = {p[1]: p for p in passages}
+        selected_title = st.selectbox("Select Passage", list(passage_dict.keys()))
 
-        selected_passage = next(p for p in passages if p[1] == selected_title)
-        passage_id = selected_passage[0]
+        pid, title, text = passage_dict[selected_title]
 
-        st.subheader(f"📖 {selected_passage[1]}")
-        st.write(selected_passage[2])
+        new_title = st.text_input("Edit Title", title)
+        new_text = st.text_area("Edit Text", text)
 
-        questions = get_questions(passage_id)
+        col1, col2 = st.columns(2)
 
-        if not questions:
-            st.warning("No questions found for this passage.")
-        else:
-            st.markdown("---")
-            st.subheader("📝 Questionnaire")
+        with col1:
+            if st.button("Update Passage"):
+                update_passage(pid, new_title, new_text)
+                st.success("Updated!")
 
-            answers = {}
-            score = 0
+        with col2:
+            if st.button("Delete Passage"):
+                delete_passage(pid)
+                st.warning("Deleted!")
+                st.experimental_rerun()
 
-            for q_id, q_text in questions:
-                st.write(f"**{q_text}**")
-                options = get_options(q_id)
+        # -------------------------------
+        # QUESTIONS
+        # -------------------------------
+        st.subheader("📝 Manage Questions")
 
-                labels = [o[1] for o in options]
-                selected_option = st.radio("", labels, key=f"q_{q_id}")
+        questions = get_questions(pid)
 
-                weight = next(o[2] for o in options if o[1] == selected_option)
-                score += weight
-                answers[q_text] = selected_option
+        for q_id, q_text in questions:
+            st.write(f"QID: {q_id}")
+            new_q = st.text_input(f"Edit Q{q_id}", q_text)
 
-                st.markdown("---")
+            col1, col2 = st.columns(2)
 
-            if st.button("Submit Responses"):
-                if not user_name:
-                    st.error("Please enter your name.")
-                else:
-                    empathy_level = get_empathy_level(score)
-                    answers_json = json.dumps(answers)
+            with col1:
+                if st.button(f"Update Q{q_id}"):
+                    update_question(q_id, new_q)
 
-                    save_response(
-                        passage_id,
-                        user_name,
-                        score,
-                        empathy_level,
-                        answers_json
+            with col2:
+                if st.button(f"Delete Q{q_id}"):
+                    delete_question(q_id)
+                    st.experimental_rerun()
+
+            options = get_options(q_id)
+
+            for opt_id, label, weight in options:
+                col1, col2, col3 = st.columns([4, 2, 1])
+
+                with col1:
+                    new_label = st.text_input(f"Opt {opt_id}", label)
+
+                with col2:
+                    new_weight = st.selectbox(
+                        "Weight",
+                        [1,2,3,4,5],
+                        index=weight-1,
+                        key=f"w_{opt_id}"
                     )
 
-                    st.success("✅ Response saved successfully!")
-                    st.metric("Your Empathy Score", score)
-                    st.metric("Empathy Level", empathy_level)
+                with col3:
+                    if st.button("❌", key=f"d_{opt_id}"):
+                        delete_option(opt_id)
+                        st.experimental_rerun()
+
+                if st.button(f"Update Opt {opt_id}"):
+                    update_option(opt_id, new_label, new_weight)
+
+            st.markdown("---")
+
+    # -------------------------------
+    # CREATE NEW PASSAGE
+    # -------------------------------
+    st.subheader("➕ Add New Passage")
+
+    title = st.text_input("Title")
+    text = st.text_area("Passage")
+
+    if st.button("Generate Questions"):
+        st.session_state.questions = generate_questions_from_passage(text)
+
+    questions = st.session_state.get("questions", [])
+
+    blocks = []
+
+    for i, q in enumerate(questions):
+        q_text = st.text_input(f"Q{i+1}", q)
+        opts = []
+
+        for j in range(5):
+            opt = st.text_input(f"Option {j+1} Q{i+1}")
+            weight = st.selectbox("Weight", [1,2,3,4,5], key=f"{i}{j}")
+            opts.append((opt, weight))
+
+        blocks.append((q_text, opts))
+
+    if st.button("Save New Passage"):
+        pid = add_passage(title, text)
+
+        for q, opts in blocks:
+            qid = add_question(pid, q)
+            add_options(qid, opts)
+
+        st.success("Saved!")
+
+# =====================================================
+# USER MODE
+# =====================================================
+if mode == "User":
+    st.title("🧠 Empathy Analysis")
+
+    name = st.text_input("Your Name")
+
+    passages = get_passages()
+
+    if passages:
+        titles = [p[1] for p in passages]
+        selected = st.selectbox("Choose Passage", titles)
+
+        p = next(x for x in passages if x[1] == selected)
+        pid = p[0]
+
+        st.subheader(p[1])
+        st.write(p[2])
+
+        questions = get_questions(pid)
+
+        score = 0
+        answers = {}
+
+        for q_id, q_text in questions:
+            st.write(q_text)
+            options = get_options(q_id)
+
+            labels = [o[1] for o in options]
+            choice = st.radio("", labels, key=q_id)
+
+            weight = next(o[2] for o in options if o[1] == choice)
+            score += weight
+            answers[q_text] = choice
+
+        if st.button("Submit"):
+            level = get_empathy_level(score)
+            save_response(pid, name, score, level, json.dumps(answers))
+
+            st.success("Saved!")
+            st.metric("Score", score)
+            st.metric("Level", level)
